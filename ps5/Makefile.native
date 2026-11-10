@@ -74,7 +74,7 @@ $(OUT)/cJSON.o: $(BROGUE)/external/cJSON/cJSON.c
 # The entry point and the glue: not Brogue's own sources, so no ps5_io.h.
 $(OUT)/ps5main.o: $(PS5DIR)/ps5main.c $(HEADERS)
 	@mkdir -p $(@D)
-	$(CC) $(BASEFLAGS) -Wall -DSDL_MAIN_HANDLED $(BROGUEDEFS) $(BROGUEINC) \
+	$(CC) $(BASEFLAGS) -Wall -DSDL_MAIN_HANDLED $(EXTRA) $(BROGUEDEFS) $(BROGUEINC) \
 	    $(SDLINC) -isystem $(PS5_OPENGL_PREFIX)/include -c -o $@ $<
 
 clean:

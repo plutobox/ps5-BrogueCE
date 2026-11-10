@@ -139,10 +139,14 @@ done
 echo "Bound to the platform layer: ${bound[*]}"
 
 # ps5main.c gives Brogue's tile renderer the OpenGL window, and a software
-# renderer drawing into an off-screen surface that it presents with OpenGL
-# (ps5-opengl's SDL2 has no window surface and no render backend but the
-# software one), and keeps the title alive in place of exit().
+# renderer (its own: the SDL has no render subsystem) drawing into an
+# off-screen surface that it presents with OpenGL (and no window surface), and keeps the title alive in place of exit().
 wraps="--wrap=SDL_CreateWindow --wrap=SDL_CreateRenderer --wrap=SDL_GetRenderer"
+wraps+=" --wrap=SDL_SetRenderDrawBlendMode --wrap=SDL_GetRendererInfo"
+wraps+=" --wrap=SDL_GetRendererOutputSize --wrap=SDL_SetRenderDrawColor"
+wraps+=" --wrap=SDL_CreateTextureFromSurface --wrap=SDL_SetTextureBlendMode"
+wraps+=" --wrap=SDL_SetTextureColorMod --wrap=SDL_DestroyTexture"
+wraps+=" --wrap=SDL_RenderReadPixels"
 wraps+=" --wrap=SDL_SetWindowFullscreen --wrap=SDL_GetWindowFlags"
 wraps+=" --wrap=SDL_SetWindowSize --wrap=SDL_RestoreWindow --wrap=SDL_SetWindowIcon"
 wraps+=" --wrap=SDL_RenderClear --wrap=SDL_RenderFillRect --wrap=SDL_RenderCopy"

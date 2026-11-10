@@ -632,12 +632,22 @@ SDL_Window *__wrap_SDL_CreateWindow(const char *title, int x, int y, int w,
     return window;
 }
 
-/* ...and a renderer for it: a software one that draws into `game`. */
+/* ...and a renderer for it.  ps5-opengl's SDL is built without a render
+ * subsystem ("SDL not built with rendering support", even for the software
+ * renderer), so the few calls tiles.c makes are answered here: a renderer is
+ * just `game`, a texture a surface with a colour tint, and RenderCopy blends
+ * it in. */
+struct fake_texture {
+    SDL_Surface *surface;       /* ARGB8888 */
+    Uint8 r, g, b;              /* colour modulation */
+};
+
+static Uint8 draw_r, draw_g, draw_b;
+
 SDL_Renderer *__wrap_SDL_CreateRenderer(SDL_Window *w, int index, Uint32 flags)
 {
     (void) w, (void) index, (void) flags;
-    if (!renderer)
-        renderer = SDL_CreateSoftwareRenderer(game);
+    renderer = (SDL_Renderer *) game;
     return renderer;
 }
 
@@ -645,6 +655,164 @@ SDL_Renderer *__wrap_SDL_GetRenderer(SDL_Window *w)
 {
     (void) w;
     return renderer;
+}
+
+int __wrap_SDL_SetRenderDrawBlendMode(SDL_Renderer *r, SDL_BlendMode mode)
+{
+    (void) r, (void) mode;
+    return 0;
+}
+
+int __wrap_SDL_GetRendererInfo(SDL_Renderer *r, SDL_RendererInfo *info)
+{
+    (void) r;
+    memset(info, 0, sizeof *info);
+    info->name = "ps5 software";
+    info->flags = SDL_RENDERER_SOFTWARE;
+    return 0;
+}
+
+int __wrap_SDL_GetRendererOutputSize(SDL_Renderer *r, int *w, int *h)
+{
+    (void) r;
+    if (w)
+        *w = game->w;
+    if (h)
+        *h = game->h;
+    return 0;
+}
+
+int __wrap_SDL_SetRenderDrawColor(SDL_Renderer *r, Uint8 red, Uint8 green,
+                                  Uint8 blue, Uint8 alpha)
+{
+    (void) r, (void) alpha;
+    draw_r = red, draw_g = green, draw_b = blue;
+    return 0;
+}
+
+int __wrap_SDL_RenderClear(SDL_Renderer *r)
+{
+    (void) r;
+    game_dirty = 1;
+    return SDL_FillRect(game, NULL,
+                        SDL_MapRGB(game->format, draw_r, draw_g, draw_b));
+}
+
+int __wrap_SDL_RenderFillRect(SDL_Renderer *r, const SDL_Rect *rect)
+{
+    (void) r;
+    game_dirty = 1;
+    return SDL_FillRect(game, rect,
+                        SDL_MapRGB(game->format, draw_r, draw_g, draw_b));
+}
+
+SDL_Texture *__wrap_SDL_CreateTextureFromSurface(SDL_Renderer *r,
+                                                 SDL_Surface *surface)
+{
+    struct fake_texture *t = calloc(1, sizeof *t);
+
+    (void) r;
+    if (!t)
+        return NULL;
+    t->surface = SDL_ConvertSurfaceFormat(surface, SDL_PIXELFORMAT_ARGB8888, 0);
+    if (!t->surface) {
+        free(t);
+        return NULL;
+    }
+    t->r = t->g = t->b = 255;
+    return (SDL_Texture *) t;
+}
+
+int __wrap_SDL_SetTextureBlendMode(SDL_Texture *texture, SDL_BlendMode mode)
+{
+    (void) texture, (void) mode;
+    return 0;
+}
+
+int __wrap_SDL_SetTextureColorMod(SDL_Texture *texture, Uint8 red, Uint8 green,
+                                  Uint8 blue)
+{
+    struct fake_texture *t = (struct fake_texture *) texture;
+
+    t->r = red, t->g = green, t->b = blue;
+    return 0;
+}
+
+void __wrap_SDL_DestroyTexture(SDL_Texture *texture)
+{
+    struct fake_texture *t = (struct fake_texture *) texture;
+
+    if (t) {
+        SDL_FreeSurface(t->surface);
+        free(t);
+    }
+}
+
+/* Blend the source rectangle of a texture, tinted, over `game`. */
+int __wrap_SDL_RenderCopy(SDL_Renderer *r, SDL_Texture *texture,
+                          const SDL_Rect *src, const SDL_Rect *dst)
+{
+    struct fake_texture *t = (struct fake_texture *) texture;
+    SDL_Rect s = { 0, 0, t->surface->w, t->surface->h };
+    SDL_Rect d = { 0, 0, game->w, game->h };
+    int x, y;
+
+    (void) r;
+    if (src)
+        s = *src;
+    if (dst)
+        d = *dst;
+    if (s.w <= 0 || s.h <= 0 || d.w <= 0 || d.h <= 0)
+        return 0;
+    game_dirty = 1;
+    for (y = 0; y < d.h; y++) {
+        int dy = d.y + y, sy = s.y + y * s.h / d.h;
+        const Uint32 *from;
+        Uint8 *to;
+
+        if (dy < 0 || dy >= game->h || sy < 0 || sy >= t->surface->h)
+            continue;
+        from = (const Uint32 *) ((Uint8 *) t->surface->pixels
+                                 + sy * t->surface->pitch);
+        to = (Uint8 *) game->pixels + dy * game->pitch;
+        for (x = 0; x < d.w; x++) {
+            int dx = d.x + x, sx = s.x + x * s.w / d.w;
+            Uint32 p;
+            unsigned a;
+            Uint8 *o;
+
+            if (dx < 0 || dx >= game->w || sx < 0 || sx >= t->surface->w)
+                continue;
+            p = from[sx];
+            a = p >> 24;
+            if (!a)
+                continue;
+            o = to + dx * 4; /* bytes R, G, B, A */
+            o[0] = (Uint8) (o[0] + ((int) (((p >> 16) & 255) * t->r / 255) - o[0]) * (int) a / 255);
+            o[1] = (Uint8) (o[1] + ((int) (((p >> 8) & 255) * t->g / 255) - o[1]) * (int) a / 255);
+            o[2] = (Uint8) (o[2] + ((int) ((p & 255) * t->b / 255) - o[2]) * (int) a / 255);
+            o[3] = 255;
+        }
+    }
+    return 0;
+}
+
+/* Screenshots: the frame as ARGB8888. */
+int __wrap_SDL_RenderReadPixels(SDL_Renderer *r, const SDL_Rect *rect,
+                                Uint32 format, void *pixels, int pitch)
+{
+    int x, y;
+
+    (void) r, (void) rect, (void) format;
+    for (y = 0; y < game->h; y++) {
+        const Uint8 *from = (const Uint8 *) game->pixels + y * game->pitch;
+        Uint32 *to = (Uint32 *) ((Uint8 *) pixels + y * pitch);
+
+        for (x = 0; x < game->w; x++)
+            to[x] = 0xff000000u | (from[x * 4] << 16) | (from[x * 4 + 1] << 8)
+                    | from[x * 4 + 2];
+    }
+    return 0;
 }
 
 /* The window is fixed, full screen and without an icon. */
@@ -673,30 +841,6 @@ void __wrap_SDL_RestoreWindow(SDL_Window *w)
 void __wrap_SDL_SetWindowIcon(SDL_Window *w, SDL_Surface *icon)
 {
     (void) w, (void) icon;
-}
-
-/* Anything Brogue draws marks the frame to be shown. */
-int __real_SDL_RenderClear(SDL_Renderer *r);
-int __wrap_SDL_RenderClear(SDL_Renderer *r)
-{
-    game_dirty = 1;
-    return __real_SDL_RenderClear(r);
-}
-
-int __real_SDL_RenderFillRect(SDL_Renderer *r, const SDL_Rect *rect);
-int __wrap_SDL_RenderFillRect(SDL_Renderer *r, const SDL_Rect *rect)
-{
-    game_dirty = 1;
-    return __real_SDL_RenderFillRect(r, rect);
-}
-
-int __real_SDL_RenderCopy(SDL_Renderer *r, SDL_Texture *t,
-                          const SDL_Rect *src, const SDL_Rect *dst);
-int __wrap_SDL_RenderCopy(SDL_Renderer *r, SDL_Texture *t,
-                          const SDL_Rect *src, const SDL_Rect *dst)
-{
-    game_dirty = 1;
-    return __real_SDL_RenderCopy(r, t, src, dst);
 }
 
 /* The frame is finished: show it, with the hints under it. */
@@ -1156,8 +1300,10 @@ static void farewell(int status)
  * this does not reach), then wait for the player to close the title. */
 void __wrap_exit(int status)
 {
-    printf("brogue: exited (status %d); close it from the home screen\n",
-           status);
+    printf("brogue: exited (status %d) from %p; brogue_main is at %p; close it "
+           "from the home screen\n", status, __builtin_return_address(0),
+           (void *) brogue_main);
+    printf("brogue: last SDL error: %s\n", SDL_GetError());
     if (brogue_started)
         writeIntoConfig();
     fflush(NULL);
@@ -1177,6 +1323,9 @@ int main(int argc, char **argv)
         setvbuf(stdout, NULL, _IONBF, 0);
         dup2(fileno(stdout), fileno(stderr));
     }
+    /* Brogue's error messages go to stderr: make sure they land in the log. */
+    if (freopen("/data/brogue-ps5.log", "a", stderr))
+        setvbuf(stderr, NULL, _IONBF, 0);
     printf("Brogue starting\n");
 
     SDL_SetMainReady();
