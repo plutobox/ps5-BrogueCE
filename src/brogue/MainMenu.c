@@ -356,6 +356,9 @@ static void initializeMainMenu(buttonState *menu, brogueButton *buttons, windowp
     stackButtons(buttons, MAIN_MENU_BUTTON_COUNT, position, 2, false);
 
     initializeMenu(menu, buttons, MAIN_MENU_BUTTON_COUNT, shadowBuf);
+#ifdef BROGUE_PS5
+    menu->buttonFocused = 0; // New Game is ready: Cross starts it
+#endif
 }
 
 /// @brief Initialize a flyout menu and position the buttons
@@ -564,6 +567,7 @@ static void titleMenu() {
         do {
 #ifdef BROGUE_PS5
             padNavigated = false;
+            theEvent.eventType = EVENT_ERROR; // a frame without input must not re-read the last key (it would rebuild the flyout and lose its focus)
 #endif
             if (isApplicationActive()) {
                 // Update the display.

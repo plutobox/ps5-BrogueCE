@@ -417,6 +417,9 @@ short buttonInputLoop(brogueButton *buttons,
     
     initializeButtonState(&state, buttons, buttonCount, winX, winY, winWidth, winHeight);
     state.arrowNavigation = true;
+#ifdef BROGUE_PS5
+    moveButtonFocus(&state, 0, 1); // the first button is ready: Cross takes it
+#endif
 
     const int oldPadContext = padContext;
     padContext = PAD_CONTEXT_BUTTONS;

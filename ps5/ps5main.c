@@ -509,7 +509,7 @@ static const struct hint map_hints[] = {
     { SYM(S_CROSS), "Look / travel" }, { SYM(S_SQUARE), "Explore" },
     { SYM(S_TRIANGLE), "Pack" },       { NAMED("Options"), "Menu" },
     { NAMED("L1 R1"), "Stairs" },      { NAMED("L2"), "Search" },
-    { NAMED("R2"), "Rest" }, END_HINTS
+    { NAMED("R2"), "Rest" },           { NAMED("R3"), "Help" }, END_HINTS
 };
 static const struct hint cursor_hints[] = {
     { NAMED("D-pad"), "Move cursor" }, { SYM(S_CROSS), "Go here" },
@@ -1046,10 +1046,10 @@ static SDL_Keycode button_key(int button)
     case B_TRIANGLE: return dungeon ? 'i'               /* the pack */
                           : pointing ? SDLK_TAB : 0;    /* the next thing */
     case B_OPTIONS:  return dungeon ? (SDL_Keycode) PAD_MENU_KEY : 0;
-    case B_SHARE:    return dungeon ? '?' : 0;          /* help */
+    /* Create is the console's own capture button: a game never sees it. */
     case B_TOUCHPAD: return dungeon ? 'M' : 0;          /* messages */
     case B_L3:       return dungeon ? 'Z' : 0;          /* rest until better */
-    case B_R3:       return dungeon ? 'T' : 0;          /* throw again */
+    case B_R3:       return dungeon ? '?' : 0;          /* help (all games) */
     case B_L1:       return dungeon || pointing ? '<' : 0;
     case B_R1:       return dungeon || pointing ? '>' : 0;
     case B_L2:       return dungeon ? 's' : 0;          /* search */

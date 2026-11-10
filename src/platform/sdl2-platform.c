@@ -42,6 +42,12 @@ corresponding TextInputEvents.
 static boolean eventFromKey(rogueEvent *event, SDL_Keycode key) {
     event->param1 = -1;
 
+#ifdef BROGUE_PS5
+    if (key == PAD_MENU_KEY) { // the controller's Options button
+        event->param1 = PAD_MENU_KEY;
+        return true;
+    }
+#endif
     switch (key) {
         case SDLK_ESCAPE:
             event->param1 = ESCAPE_KEY;
