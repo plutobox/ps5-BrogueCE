@@ -5713,7 +5713,10 @@ boolean chooseTarget(pos *returnLoc,
         }
 
         oldTargetLoc = targetLoc;
+        const int previousPadContext = padContext;
+        padContext = PAD_CONTEXT_AIM;
         moveCursor(&targetConfirmed, &canceled, &tabKey, &targetLoc, &event, NULL, false, true, false);
+        padContext = previousPadContext;
         if (event.eventType == RIGHT_MOUSE_UP) { // Right mouse cancels.
             canceled = true;
         }

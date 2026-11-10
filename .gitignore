@@ -18,3 +18,8 @@ BrogueCE-*
 *.gcov
 *.desktop
 gmon.out
+
+# PS5 native title build
+ps5/obj-native/
+ps5/build-ps5/
+ps5/brogue-native.objs

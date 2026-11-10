@@ -335,6 +335,9 @@ static void initializeMenu(buttonState *menu, brogueButton *buttons, short butto
     short height = maxY - minY;
 
     initializeButtonState(menu, buttons, buttonCount, minX, minY, width, height);
+#ifdef BROGUE_PS5
+    menu->arrowNavigation = true;
+#endif
 
     // Draws a rectangular shaded area of the specified color and opacity to a buffer. Position x, y is the upper/left.
     // The shading effect outside the rectangle decreases with distance.
@@ -524,6 +527,10 @@ static void titleMenu() {
     // Initialize the RNG so the flames aren't always the same.
     seedRandomGenerator(0);
 
+#ifdef BROGUE_PS5
+    padContext = PAD_CONTEXT_BUTTONS; // the title menu is driven like any menu of buttons
+#endif
+
     // Empty nextGamePath and nextGameSeed so that the buttons don't try to load an old game path or seed.
     rogue.nextGamePath[0] = '\0';
     rogue.nextGameSeed = 0;
@@ -542,6 +549,7 @@ static void titleMenu() {
     short mainIndex = -1;
     short flyoutIndex = -1;
     windowpos bPos;
+    boolean padNavigated = false; // the last event only moved the focus between buttons (controller play)
 
     // Outer loop for menu navigation (showing/hiding the flyout menus). Repeat until the user selects
     // a button with a command handled by mainBrogueJunction.
@@ -554,6 +562,9 @@ static void titleMenu() {
         // Inner input loop until the user selects a button or presses a key. For mouse input, a button
         // is considered selected only on the MOUSE_UP event.
         do {
+#ifdef BROGUE_PS5
+            padNavigated = false;
+#endif
             if (isApplicationActive()) {
                 // Update the display.
                 updateMenuFlames(colors, colorSources, flames);
@@ -602,7 +613,16 @@ static void titleMenu() {
                     // Process the main menu input
                     mainIndex = processButtonInput(&mainMenu, NULL, &theEvent);
 
-                    if (theEvent.eventType == MOUSE_UP || theEvent.eventType == KEYSTROKE) {
+#ifdef BROGUE_PS5
+                    // The arrow keys only move the focus between buttons: they must not close a flyout.
+                    if (theEvent.eventType == KEYSTROKE
+                        && (theEvent.param1 == UP_ARROW || theEvent.param1 == DOWN_ARROW
+                            || theEvent.param1 == LEFT_ARROW || theEvent.param1 == RIGHT_ARROW)) {
+                        padNavigated = true;
+                    }
+#endif
+
+                    if (!padNavigated && (theEvent.eventType == MOUSE_UP || theEvent.eventType == KEYSTROKE)) {
                         if (mainIndex != - 1 && rogue.nextGame != mainButtons[mainIndex].command) {
                             rogue.nextGame = mainButtons[mainIndex].command;
                         } else if (flyoutIndex == -1) {
@@ -615,9 +635,13 @@ static void titleMenu() {
             } else {
                 pauseBrogue(64, PAUSE_BEHAVIOR_DEFAULT);
             }
-        } while (theEvent.eventType != MOUSE_UP && theEvent.eventType != KEYSTROKE && (isFlyoutActive() || rogue.nextGame == NG_NOTHING));
+        } while ((padNavigated || (theEvent.eventType != MOUSE_UP && theEvent.eventType != KEYSTROKE))
+                 && (isFlyoutActive() || rogue.nextGame == NG_NOTHING));
     } while (isFlyoutActive() || rogue.nextGame == NG_NOTHING);
     drawMenuFlames(flames, mask);
+#ifdef BROGUE_PS5
+    padContext = PAD_CONTEXT_MAP;
+#endif
 }
 
 // Closes Brogue without any further prompts, animations, or user interaction.

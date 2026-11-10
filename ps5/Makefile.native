@@ -1,0 +1,83 @@
+# Compile Brogue CE as a native PS5 title (eboot.bin) for ShadowMountPlus and
+# the PS5 homebrew catalog.
+#
+#   make -f Makefile.native            -> brogue-native.objs
+#   bash package-native.sh --build     -> build-ps5/app/dist/<TITLE_ID>.zip
+#
+# It uses ps5-native-app-boilerplate's compiler, ps5-opengl's SDL2 (an OpenGL
+# window, presented by ps5main.c), the boilerplate's PacBrew SDL2_image and
+# the platform layer; see README.md.  Brogue's own tile renderer is kept: it
+# draws through SDL's software renderer into an off-screen surface that
+# ps5main.c shows with OpenGL.
+
+PS5DIR := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
+BROGUE := $(abspath $(PS5DIR)/..)
+
+PS5_NATIVE_TEMPLATE ?= $(HOME)/ps5-native-app-boilerplate
+PS5_NATIVE_SDK      ?= $(PS5_NATIVE_TEMPLATE)/.deps/native/ps5-payload-sdk
+PS5_PACBREW_PREFIX  ?= $(PS5_NATIVE_TEMPLATE)/.deps/pacbrew/v0.40.2/sysroot/user/homebrew
+PS5_SDL2_PREFIX     ?= $(HOME)/ps5-opengl/build/sdl-native/sdk
+PS5_OPENGL_PREFIX   ?= $(HOME)/ps5-opengl-sdk/ps5-opengl-sdk-1.0.2/sdk
+
+CC := env PS5_PAYLOAD_SDK=$(PS5_NATIVE_SDK) sh $(PS5_NATIVE_TEMPLATE)/tooling/prospero-clang18
+
+OUT := $(PS5DIR)/obj-native
+
+BASEFLAGS := -O2 -g -D__PROSPERO__ -DPS5_NATIVE -fPIC -ffunction-sections \
+             -fdata-sections
+# The title root, /app0, holds assets/ (DATADIR); everything the game writes
+# goes under /download0/brogue (ps5_io.h, ps5main.c).
+BROGUEDEFS := -DBROGUE_SDL -DBROGUE_PS5 -DDATADIR=/app0 \
+              -DBROGUE_EXTRA_VERSION='"-ps5"'
+SDLINC := -isystem $(PS5_SDL2_PREFIX)/include/SDL2 -D_THREAD_SAFE \
+          -isystem $(PS5_PACBREW_PREFIX)/include/SDL2
+BROGUEINC := -I$(BROGUE)/src/brogue -I$(BROGUE)/src/platform \
+             -I$(BROGUE)/src/variants -I$(BROGUE)/external/cJSON
+BROGUEFLAGS := -std=gnu99 -Wall -Wno-parentheses -Wno-unused-result \
+               -Wno-format-overflow -Werror=implicit -include $(PS5DIR)/ps5_io.h
+
+SRC_BROGUE   := $(notdir $(basename $(wildcard $(BROGUE)/src/brogue/*.c)))
+SRC_VARIANTS := $(notdir $(basename $(wildcard $(BROGUE)/src/variants/*.c)))
+SRC_PLATFORM := main platformdependent null-platform sdl2-platform tiles
+
+OBJS := $(addprefix $(OUT)/brogue/,$(addsuffix .o,$(SRC_BROGUE))) \
+        $(addprefix $(OUT)/variants/,$(addsuffix .o,$(SRC_VARIANTS))) \
+        $(addprefix $(OUT)/platform/,$(addsuffix .o,$(SRC_PLATFORM))) \
+        $(OUT)/cJSON.o $(OUT)/ps5main.o
+
+all: brogue-native.objs
+
+# Every object is linked by package-native.sh.
+brogue-native.objs: $(OBJS)
+	@printf '%s\n' $(OBJS) > $@
+
+COMPILE = $(CC) $(BASEFLAGS) $(BROGUEDEFS) $(BROGUEINC) $(SDLINC) $(BROGUEFLAGS)
+HEADERS := $(wildcard $(BROGUE)/src/*/*.h) $(PS5DIR)/ps5_io.h
+
+$(OUT)/brogue/%.o: $(BROGUE)/src/brogue/%.c $(HEADERS)
+	@mkdir -p $(@D)
+	$(COMPILE) -c -o $@ $<
+$(OUT)/variants/%.o: $(BROGUE)/src/variants/%.c $(HEADERS)
+	@mkdir -p $(@D)
+	$(COMPILE) -c -o $@ $<
+# Brogue's main() is called by ps5main.c's, once the display is up.
+$(OUT)/platform/main.o: $(BROGUE)/src/platform/main.c $(HEADERS)
+	@mkdir -p $(@D)
+	$(COMPILE) -Dmain=brogue_main -c -o $@ $<
+$(OUT)/platform/%.o: $(BROGUE)/src/platform/%.c $(HEADERS)
+	@mkdir -p $(@D)
+	$(COMPILE) -c -o $@ $<
+$(OUT)/cJSON.o: $(BROGUE)/external/cJSON/cJSON.c
+	@mkdir -p $(@D)
+	$(CC) $(BASEFLAGS) -w -c -o $@ $<
+
+# The entry point and the glue: not Brogue's own sources, so no ps5_io.h.
+$(OUT)/ps5main.o: $(PS5DIR)/ps5main.c $(HEADERS)
+	@mkdir -p $(@D)
+	$(CC) $(BASEFLAGS) -Wall -DSDL_MAIN_HANDLED $(BROGUEDEFS) $(BROGUEINC) \
+	    $(SDLINC) -isystem $(PS5_OPENGL_PREFIX)/include -c -o $@ $<
+
+clean:
+	rm -rf $(OUT) brogue-native.objs build-ps5
+
+.PHONY: all clean

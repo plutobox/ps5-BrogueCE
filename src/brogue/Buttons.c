@@ -186,10 +186,66 @@ void initializeButtonState(buttonState *state,
     state->winY         = winY;
     state->winWidth     = winWidth;
     state->winHeight    = winHeight;
+    state->arrowNavigation = false;
     for (int i=0; i < state->buttonCount; i++) {
         state->buttons[i] = buttons[i];
     }
 }
+
+int padContext = PAD_CONTEXT_MAP;
+
+#ifdef BROGUE_PS5
+static boolean buttonIsSelectable(const brogueButton *b) {
+    return (b->flags & B_DRAW) && (b->flags & B_ENABLED);
+}
+
+// Moves the focus to the neighboring button in a direction (dx, dy are -1, 0 or 1; one is 0).
+// With no focus yet, down/right focus the first button and up/left the last.
+// Vertically it wraps from the last button to the first. Horizontally it stays in the button's row.
+static void moveButtonFocus(buttonState *state, int dx, int dy) {
+    int current = state->buttonFocused, best = -1, bestScore = 0;
+
+    if (current < 0 || current >= state->buttonCount || !buttonIsSelectable(&state->buttons[current])) {
+        int first = -1, last = -1;
+        for (int i = 0; i < state->buttonCount; i++) {
+            if (buttonIsSelectable(&state->buttons[i])) {
+                if (first < 0) first = i;
+                last = i;
+            }
+        }
+        state->buttonFocused = (dx > 0 || dy > 0) ? first : last;
+        return;
+    }
+
+    const int cx = state->buttons[current].x + strLenWithoutEscapes(state->buttons[current].text) / 2;
+    const int cy = state->buttons[current].y;
+
+    for (int wrap = 0; wrap < 2 && best < 0; wrap++) {
+        if (wrap && dx) break;
+        for (int i = 0; i < state->buttonCount; i++) {
+            if (i == current || !buttonIsSelectable(&state->buttons[i])) continue;
+            const int x = state->buttons[i].x + strLenWithoutEscapes(state->buttons[i].text) / 2;
+            const int y = state->buttons[i].y;
+            int score;
+            if (dy) {
+                // The nearest button ahead; when wrapping, the farthest one behind.
+                int along = (y - cy) * dy;
+                if (wrap ? along >= 0 : along <= 0) continue;
+                score = along * 1000 + abs(x - cx);
+            } else {
+                int along = (x - cx) * dx;
+                if (abs(y - cy) > 1 || along <= 0) continue;
+                score = along * 1000 + abs(y - cy);
+            }
+            if (best < 0 || score < bestScore) {
+                best = i;
+                bestScore = score;
+            }
+        }
+    }
+    if (best >= 0) state->buttonFocused = best;
+}
+#endif
 
 // Processes one round of user input, and updates `state` accordingly.
 // If a button is pressed, draws to the screen and briefly pauses, but then
@@ -257,6 +313,18 @@ short processButtonInput(buttonState *state, boolean *canceled, rogueEvent *even
     }
 
     // Keystroke:
+#ifdef BROGUE_PS5
+    if (event->eventType == KEYSTROKE && state->arrowNavigation
+        && event->param1 == RETURN_KEY
+        && state->buttonFocused >= 0 && state->buttonFocused < state->buttonCount
+        && buttonIsSelectable(&state->buttons[state->buttonFocused])) {
+
+        // Return presses the focused button.
+        state->buttonDepressed = state->buttonFocused;
+        state->buttonChosen = state->buttonFocused;
+        return state->buttonChosen;
+    }
+#endif
     if (event->eventType == KEYSTROKE) {
 
         // Cycle through all of the hotkeys of all of the buttons.
@@ -299,6 +367,17 @@ short processButtonInput(buttonState *state, boolean *canceled, rogueEvent *even
             }
         }
 
+#ifdef BROGUE_PS5
+        if (!buttonUsed && state->arrowNavigation) {
+            switch (event->param1) {
+                case UP_ARROW:    moveButtonFocus(state, 0, -1); break;
+                case DOWN_ARROW:  moveButtonFocus(state, 0, 1);  break;
+                case LEFT_ARROW:  moveButtonFocus(state, -1, 0); break;
+                case RIGHT_ARROW: moveButtonFocus(state, 1, 0);  break;
+            }
+        }
+#endif
+
         if (!buttonUsed
             && (event->param1 == ESCAPE_KEY || event->param1 == ACKNOWLEDGE_KEY)) {
             // If the player pressed escape, we're done.
@@ -337,6 +416,10 @@ short buttonInputLoop(brogueButton *buttons,
     canceled = false;
     
     initializeButtonState(&state, buttons, buttonCount, winX, winY, winWidth, winHeight);
+    state.arrowNavigation = true;
+
+    const int oldPadContext = padContext;
+    padContext = PAD_CONTEXT_BUTTONS;
 
     do {
         screenDisplayBuffer dbuf;
@@ -357,6 +440,8 @@ short buttonInputLoop(brogueButton *buttons,
         restoreDisplayBuffer(&rbuf);
 
     } while (button == -1 && !canceled);
+
+    padContext = oldPadContext;
 
     if (returnEvent) {
         *returnEvent = theEvent;

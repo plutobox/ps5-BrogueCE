@@ -1220,6 +1220,7 @@ enum tileFlags {
 #define PAGE_UP_KEY         63276
 #define PAGE_DOWN_KEY       63277
 #define PRINTSCREEN_KEY     '\054'
+#define PAD_MENU_KEY        63290 // the controller's Options button: opens the actions menu
 
 #define UNKNOWN_KEY         (128+19)
 
@@ -2817,7 +2818,24 @@ typedef struct buttonState {
     short winY;
     short winWidth;
     short winHeight;
+
+    // True where the arrow keys move the focus between the buttons and Return
+    // presses the focused one (controller play).
+    boolean arrowNavigation;
 } buttonState;
+
+// What the player is being asked for, for platforms that show hints for it
+// (the PS5's button hints). Set by the code that waits for input.
+enum padContexts {
+    PAD_CONTEXT_MAP,        // the dungeon
+    PAD_CONTEXT_CURSOR,     // choosing where to look or travel with the keyboard cursor
+    PAD_CONTEXT_AIM,        // choosing a target for a throw, staff, or wand
+    PAD_CONTEXT_BUTTONS,    // a menu or dialog made of buttons
+    PAD_CONTEXT_ACKNOWLEDGE,// a message to dismiss
+    PAD_CONTEXT_TEXT,       // a line of text
+    PAD_CONTEXT_COUNT
+};
+extern int padContext;
 
 enum messageFlags {
     REQUIRE_ACKNOWLEDGMENT        = Fl(0),
@@ -3028,6 +3046,11 @@ extern "C" {
     short wrapText(char *to, const char *sourceText, short width);
     short printStringWithWrapping(const char *theString, short x, short y, short width, const color *foreColor,
                                   const color *backColor, screenDisplayBuffer *dbuf);
+#ifdef BROGUE_PS5
+    // defined in the PS5 platform code: a line of text typed with the system keyboard.
+    // Returns 1 with the text in answer, 0 if the player cancelled, -1 if the keyboard cannot open.
+    int ps5TextInput(const char *prompt, const char *initial, char *answer, int size);
+#endif
     boolean getInputTextString(char *inputText,
                                const char *prompt,
                                short maxLength,

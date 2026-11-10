@@ -446,3 +446,14 @@ struct brogueConsole sdlConsole = {
     _takeScreenshot,
     _setGraphicsMode
 };
+
+#ifdef BROGUE_PS5
+// What the controller is being asked for, for the button hints and for what each button sends.
+// Returns a value of enum padContexts.
+int ps5HintContext(void) {
+    if (padContext == PAD_CONTEXT_MAP && rogue.cursorMode) {
+        return PAD_CONTEXT_CURSOR;
+    }
+    return padContext;
+}
+#endif

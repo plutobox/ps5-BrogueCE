@@ -698,7 +698,8 @@ void mainInputLoop() {
             doEvent = moveCursor(&targetConfirmed, &canceled, &tabKey, &rogue.cursorLoc, &theEvent, &state, !textDisplayed, rogue.cursorMode, true);
             rogue.playbackMode = false;
 
-            if (state.buttonChosen == 3) { // Actions menu button.
+            if (state.buttonChosen == 3
+                || (doEvent && theEvent.eventType == KEYSTROKE && theEvent.param1 == PAD_MENU_KEY)) { // Actions menu button.
                 buttonInput = actionMenu(buttons[3].x - 4, playingBack); // Returns the corresponding keystroke.
                 if (buttonInput == -1) { // Canceled.
                     doEvent = false;
@@ -2737,6 +2738,44 @@ boolean getInputTextString(char *inputText,
         defaultEntry[strlen(defaultEntry) - defaultEntrylengthOverflow] = '\0';
     }
 
+#ifdef BROGUE_PS5
+    {
+        // A controller cannot type: ask the system's on-screen keyboard.
+        char plainPrompt[200] = "", typed[200] = "";
+        size_t length = 0;
+        for (i = 0; prompt[i] && length < sizeof plainPrompt - 1; i++) {
+            if (prompt[i] == COLOR_ESCAPE) {
+                i += 3;
+            } else {
+                plainPrompt[length++] = prompt[i];
+            }
+        }
+        plainPrompt[length] = '\0';
+        const int limit = max(1, min(maxLength - promptSuffixLen, (int) sizeof typed - 1));
+        const int status = ps5TextInput(plainPrompt, defaultEntry, typed, limit + 1);
+        if (status == 0) {
+            return false;
+        } else if (status > 0) {
+            charNum = 0;
+            for (i = 0; typed[i] && charNum < limit; i++) {
+                keystroke = typed[i];
+                if (keystroke < textEntryBounds[textEntryType][0] || keystroke > textEntryBounds[textEntryType][1]) {
+                    continue;
+                }
+                if (textEntryType == TEXT_INPUT_FILENAME && characterForbiddenInFilename(keystroke)) {
+                    keystroke = '-';
+                }
+                inputText[charNum++] = keystroke;
+            }
+            inputText[charNum] = '\0';
+            return true;
+        }
+        // The keyboard cannot open: carry on with the keys.
+    }
+    const int oldPadContext = padContext;
+    padContext = PAD_CONTEXT_TEXT;
+#endif
+
     // x and y mark the origin for text entry.
     if (useDialogBox) {
         x = (COLS - max(maxLength, strLenWithoutEscapes(prompt))) / 2;
@@ -2830,6 +2869,10 @@ boolean getInputTextString(char *inputText,
 
     inputText[charNum] = '\0';
 
+#ifdef BROGUE_PS5
+    padContext = oldPadContext;
+#endif
+
     if (keystroke == ESCAPE_KEY) {
         return false;
     }
@@ -2914,13 +2957,18 @@ void waitForAcknowledgment() {
         return;
     }
 
+    const int oldPadContext = padContext;
+    padContext = PAD_CONTEXT_ACKNOWLEDGE;
     do {
         nextBrogueEvent(&theEvent, false, false, false);
-        if (theEvent.eventType == KEYSTROKE && theEvent.param1 != ACKNOWLEDGE_KEY && theEvent.param1 != ESCAPE_KEY) {
+        if (theEvent.eventType == KEYSTROKE && theEvent.param1 != ACKNOWLEDGE_KEY && theEvent.param1 != ESCAPE_KEY
+            && theEvent.param1 != RETURN_KEY) {
             flashTemporaryAlert(" -- Press space or click to continue -- ", 500);
         }
-    } while (!(theEvent.eventType == KEYSTROKE && (theEvent.param1 == ACKNOWLEDGE_KEY || theEvent.param1 == ESCAPE_KEY)
+    } while (!(theEvent.eventType == KEYSTROKE && (theEvent.param1 == ACKNOWLEDGE_KEY || theEvent.param1 == ESCAPE_KEY
+                                                   || theEvent.param1 == RETURN_KEY)
                || theEvent.eventType == MOUSE_UP));
+    padContext = oldPadContext;
 }
 
 void waitForKeystrokeOrMouseClick() {
