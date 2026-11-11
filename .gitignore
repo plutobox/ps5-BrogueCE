@@ -23,3 +23,7 @@ gmon.out
 ps5/obj-native/
 ps5/build-ps5/
 ps5/brogue-native.objs
+
+# Native toolchain downloads and release staging
+/ps5/.deps/
+/dist/

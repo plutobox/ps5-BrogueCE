@@ -13,7 +13,7 @@
 PS5DIR := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
 BROGUE := $(abspath $(PS5DIR)/..)
 
-PS5_NATIVE_TEMPLATE ?= $(HOME)/ps5-native-app-boilerplate
+PS5_NATIVE_TEMPLATE ?= $(if $(wildcard $(PS5DIR)/toolchain/boilerplate/tools/build.sh),$(PS5DIR)/toolchain/boilerplate,$(HOME)/ps5-native-app-boilerplate)
 PS5_NATIVE_SDK      ?= $(PS5_NATIVE_TEMPLATE)/.deps/native/ps5-payload-sdk
 PS5_PACBREW_PREFIX  ?= $(PS5_NATIVE_TEMPLATE)/.deps/pacbrew/v0.40.2/sysroot/user/homebrew
 PS5_SDL2_PREFIX     ?= $(HOME)/ps5-opengl/build/sdl-native/sdk

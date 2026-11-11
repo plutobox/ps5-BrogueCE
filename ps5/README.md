@@ -1,6 +1,9 @@
 # Brogue CE on the PS5 (PPSA92043)
 
-Native title port. General toolchain and rules: `../../CLAUDE.md` (Projects). Build in WSL:
+Native title port. For the pinned repository-local toolchain and GitHub Actions
+release controls, see [builds and releases](releases.md).
+
+With the toolchain environment loaded, build in WSL:
 
     cd ps5 && make -f Makefile.native -j8 && bash package-native.sh --build
 

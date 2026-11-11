@@ -1,0 +1,3 @@
+[submodule "ps5/toolchain/boilerplate"]
+	path = ps5/toolchain/boilerplate
+	url = https://github.com/drakmor/ps5-native-app-boilerplate.git

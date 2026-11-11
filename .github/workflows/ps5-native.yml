@@ -21,6 +21,7 @@ on:
   push:
     branches: [ps5]
     tags: ['[0-9][0-9].[0-9][0-9][0-9].[0-9][0-9][0-9]']
+  pull_request:
   workflow_dispatch:
     inputs:
       release:
@@ -29,35 +30,32 @@ on:
         options: [none, patch, minor, major, current]
         default: none
       notes:
-        description: Release notes (Markdown; short headings and bullet lists). Empty lists the commits since the last release.
+        description: >-
+          Release notes (Markdown). Leave empty to list commits since the last release.
         type: string
         default: ''
 
 permissions:
-  contents: write
+  contents: read
 
-# A release run gets its own group, so a push to ps5 can't cancel it half way.
+# Serialize builds and releases so publication cannot be interrupted.
 concurrency:
-  group: ps5-native-${{ (github.event_name == 'workflow_dispatch' && inputs.release != 'none') && 'release' || github.ref }}
-  cancel-in-progress: ${{ !(github.event_name == 'workflow_dispatch' && inputs.release != 'none') }}
+  group: ps5-native-${{ github.repository }}
+  cancel-in-progress: false
 
 jobs:
   native:
     runs-on: ubuntu-24.04
-    env:
-      BOILERPLATE_REV: 4f531c4b517f80bcb6b1267135848168d2250047
-      PS5_OPENGL_REV: 6b6bb2039f741287ed7f1bc6bc4b2c589709a0ba
-      PS5_OPENGL_SDK_VERSION: 1.0.2
-      SDL_REV: 8c56053f13ca13a0c050de613706ff69eb615836
-      # mihawk-99's fork of the payload SDK: its platform layer supplies the
-      # C library functions a title lacks or is refused.
-      PS5_PLATFORM_REV: e105cf6f25801d9e9981812a89a3b74021d2d2a2
+    timeout-minutes: 60
+    permissions:
+      contents: write
     steps:
       - name: Check out
         uses: actions/checkout@v4
         with:
           # Every tag, to compare versions and list the commits since the last.
           fetch-depth: 0
+          submodules: recursive
 
       - name: Install build tools
         run: |
@@ -73,11 +71,13 @@ jobs:
         env:
           RELEASE: ${{ github.event_name == 'workflow_dispatch' && inputs.release || 'none' }}
         run: |
-          echo "TITLE_ID=$(python3 -c 'import json; print(json.load(open("sce_sys/param.json"))["titleId"])')" >> "$GITHUB_ENV"
+          title_id=$(python3 -c \
+            'import json; print(json.load(open("sce_sys/param.json"))["titleId"])')
+          echo "TITLE_ID=$title_id" >> "$GITHUB_ENV"
           if [[ "$GITHUB_REF_TYPE" == tag ]]; then
             version=$(python3 ps5/content-version.py current)
             [[ "$GITHUB_REF_NAME" == "$version" ]] || {
-              echo "::error::tag $GITHUB_REF_NAME does not match contentVersion $version in sce_sys/param.json"
+              echo "::error::tag $GITHUB_REF_NAME does not match contentVersion $version"
               exit 1
             }
             python3 ps5/content-version.py check "$version"
@@ -95,66 +95,20 @@ jobs:
           fi
           echo "CONTENT_VERSION=$version" >> "$GITHUB_ENV"
 
-      - name: Fetch the native toolchain
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          # Fetch each pinned commit by SHA: the boilerplate's is no longer on
-          # a branch (upstream main was rewritten), but GitHub still serves it.
-          fetch_rev() {
-            git init -q "$3"
-            git -C "$3" fetch -q --depth 1 "https://github.com/$1" "$2"
-            git -C "$3" checkout -q FETCH_HEAD
-          }
-          # The boilerplate's setup scripts download quietly (wget -q); retry
-          # them, as a dropped download fails with no message.
-          retry() {
-            for attempt in 1 2 3; do
-              "$@" && return 0
-              echo "::warning::attempt $attempt failed: $*"
-              sleep 10
-            done
-            return 1
-          }
-          fetch_rev drakmor/ps5-native-app-boilerplate "$BOILERPLATE_REV" "$HOME/ps5-native-app-boilerplate"
-          # The compiler wrapper is committed without its executable bit, and
-          # the SDL2 build runs it directly.
-          chmod +x "$HOME/ps5-native-app-boilerplate/tooling/prospero-clang18"
-          # The boilerplate fetches zlib from zlib.net, which hands the runners
-          # something other than the tarball (the checksum fails). Seed the
-          # same tarball from GitHub's release; the script keeps it when the
-          # hash matches.
-          zlib_dir="$HOME/ps5-native-app-boilerplate/.deps/native/zlib"
-          mkdir -p "$zlib_dir"
-          retry curl -fsSL -o "$zlib_dir/zlib-1.3.2.tar.gz" \
-            https://github.com/madler/zlib/releases/download/v1.3.2/zlib-1.3.2.tar.gz
-          echo "bb329a0a2cd0274d05519d61c667c062e06990d72e125ee2dfa8de64f0119d16  $zlib_dir/zlib-1.3.2.tar.gz" | sha256sum --check --strict
-          retry bash "$HOME/ps5-native-app-boilerplate/tools/setup-native-dependencies.sh"
-          # The boilerplate's pinned PacBrew release: SDL2_image and its libraries for the tiles.
-          retry bash "$HOME/ps5-native-app-boilerplate/tools/setup-pacbrew-dependencies.sh" --all
+      - name: Cache pinned dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ps5/.deps
+            ps5/deps
+            ps5/toolchain/boilerplate/.deps
+          key: >-
+            native-${{ runner.os }}-${{ runner.arch }}-clang18-${{
+            hashFiles('ps5/setup-native.sh', 'ps5/fetch-deps.sh',
+            'ps5/toolchain/boilerplate/tools/**', 'ps5/toolchain/boilerplate/tooling/**') }}
 
-          fetch_rev mihawk-99/PS5_PayloadSDK "$PS5_PLATFORM_REV" "$HOME/ps5-platform-sdk"
-          fetch_rev darkxex/ps5-opengl "$PS5_OPENGL_REV" "$HOME/ps5-opengl"
-
-          mkdir -p "$HOME/ps5-opengl-sdk"
-          gh release download "v$PS5_OPENGL_SDK_VERSION" --repo darkxex/ps5-opengl \
-            --pattern "ps5-opengl-sdk-$PS5_OPENGL_SDK_VERSION.tar.gz" --dir "$RUNNER_TEMP"
-          tar -xzf "$RUNNER_TEMP/ps5-opengl-sdk-$PS5_OPENGL_SDK_VERSION.tar.gz" -C "$HOME/ps5-opengl-sdk"
-
-          fetch_rev ps5-payload-dev/SDL "$SDL_REV" "$RUNNER_TEMP/SDL"
-
-      - name: Build SDL2 for the native title
-        working-directory: /home/runner/ps5-opengl
-        run: |
-          python3 integration/SDL2/build.py native \
-            --sdl-source "$RUNNER_TEMP/SDL" \
-            --sdk-prefix "$HOME/ps5-opengl-sdk/ps5-opengl-sdk-$PS5_OPENGL_SDK_VERSION/sdk" \
-            --out build/sdl-native \
-            --payload-sdk "$HOME/ps5-native-app-boilerplate/.deps/native/ps5-payload-sdk" \
-            --compiler-wrapper "$HOME/ps5-native-app-boilerplate/tooling/prospero-clang18"
-
-      - name: Build the platform layer
-        run: make -C "$HOME/ps5-platform-sdk/platform" -j"$(nproc)"
+      - name: Set up the native toolchain
+        run: bash ps5/setup-native.sh
 
       - name: Build and package the title
         working-directory: ps5
@@ -170,6 +124,7 @@ jobs:
         with:
           name: ${{ env.TITLE_ID }}-${{ env.CONTENT_VERSION }}
           path: dist/
+          if-no-files-found: error
 
       - name: Write release notes
         if: env.RELEASE_TAG != ''
@@ -178,7 +133,8 @@ jobs:
         # The catalog shows these as the app's release notes: what changed
         # first, short headings and bullet lists, no images or links.
         run: |
-          previous=$(git tag --list '[0-9][0-9].[0-9][0-9][0-9].[0-9][0-9][0-9]' --sort=-v:refname \
+          previous=$(git tag --list '[0-9][0-9].[0-9][0-9][0-9].[0-9][0-9][0-9]' \
+            --sort=-v:refname \
             | grep -vx "$RELEASE_TAG" | head -n 1 || true)
           {
             if [[ -n "$NOTES" ]]; then

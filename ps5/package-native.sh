@@ -24,7 +24,11 @@ set -euo pipefail
 
 ps5dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 brogue=$(cd "$ps5dir/.." && pwd)
-template=${PS5_NATIVE_TEMPLATE:-$HOME/ps5-native-app-boilerplate}
+default_template="$HOME/ps5-native-app-boilerplate"
+if [[ -f "$ps5dir/toolchain/boilerplate/tools/build.sh" ]]; then
+    default_template="$ps5dir/toolchain/boilerplate"
+fi
+template=${PS5_NATIVE_TEMPLATE:-$default_template}
 opengl_repo=${PS5_OPENGL_REPO:-$HOME/ps5-opengl}
 opengl=${PS5_OPENGL_PREFIX:-$HOME/ps5-opengl-sdk/ps5-opengl-sdk-1.0.2/sdk}
 sdl2=${PS5_SDL2_PREFIX:-$HOME/ps5-opengl/build/sdl-native/sdk}
